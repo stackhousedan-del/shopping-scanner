@@ -126,7 +126,7 @@
     if(code===lastCode && (now-lastTime)<3500) return;   // debounce repeats
     lastCode=code; lastTime=now; busy=true;
     frame.classList.add('locked');
-    if(navigator.vibrate)navigator.vibrate(70); sndDetect();
+    if(navigator.vibrate)navigator.vibrate(120); sndDetect();   // firm buzz the instant a UPC is read
     setLast('Looking up '+code+'…');
     jsonp('action=scan&upc='+encodeURIComponent(code)+'&pin='+encodeURIComponent(PIN)+'&who='+encodeURIComponent(WHO))
       .then(function(r){
@@ -185,7 +185,7 @@
   document.getElementById('startbtn').onclick=function(){
     if(!window.Html5Qrcode){ startMsg.innerHTML='<span class="err">Scanner library failed to load. Check your connection and reload.</span>'; return; }
     startEl.style.display='none';
-    audio();
+    audio(); if(navigator.vibrate)navigator.vibrate(80);   // direct-gesture buzz: if you feel THIS, vibration works
     scanner=new Html5Qrcode("reader", { formatsToSupport: FORMATS, verbose:false });
     var config={ fps:12, qrbox:function(w,h){ var bw=Math.floor(Math.min(w,420)*0.78); return {width:bw, height:Math.floor(bw*0.55)}; }, aspectRatio: (window.innerHeight/window.innerWidth) };
     scanner.start({ facingMode: "environment" }, config,
