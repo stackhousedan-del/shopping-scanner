@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Scan to Shopping List</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{ --green:#16633F; --cream:#FBF7EF; --ink:#2b2218; --line:#e6ddca; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0d0d0d;color:#fff;font-family:'Hanken Grotesk',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+  #wrap{display:flex;flex-direction:column;height:100%;height:100dvh}
+  header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--green)}
+  header h1{font-size:17px;margin:0;font-weight:700}
+  header a{color:#cfe7d8;text-decoration:none;font-size:14px;font-weight:600}
+  #stage{position:relative;flex:1;overflow:hidden;background:#000}
+  #reader{width:100%;height:100%}
+  #reader video{width:100%!important;height:100%!important;object-fit:cover!important}
+  /* dim + framing overlay */
+  #frame{position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center}
+  #frame .win{position:relative;width:78%;max-width:360px;height:170px;border-radius:14px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5);outline:2px solid rgba(255,255,255,.85)}
+  #frame .laser{position:absolute;left:6%;right:6%;height:3px;background:#ff3b30;border-radius:3px;box-shadow:0 0 10px 2px rgba(255,59,48,.8);top:50%;animation:scan 1.8s ease-in-out infinite}
+  @keyframes scan{0%{top:14%}50%{top:86%}100%{top:14%}}
+  #frame.locked .win{outline-color:#23c552}
+  #frame.locked .laser{display:none}
+  #hint{position:absolute;left:0;right:0;bottom:0;text-align:center;padding:10px 16px 18px;font-size:14px;color:#eee;background:linear-gradient(transparent,rgba(0,0,0,.6))}
+  #start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0d0d0d;text-align:center;padding:24px}
+  #start p{color:#bbb;max-width:300px;margin:0}
+  .btn{background:var(--green);color:#fff;border:none;border-radius:11px;padding:14px 22px;font-size:16px;font-weight:700;cursor:pointer}
+  .btn.ghost{background:#222;color:#fff}
+  footer{background:var(--cream);color:var(--ink);padding:12px 16px;min-height:64px}
+  #count{font-weight:700;color:var(--green)}
+  #last{margin-top:4px;font-size:14px;color:#5b5345;min-height:18px}
+  .err{color:#ff6b6b;padding:16px;text-align:center}
+  .pulse{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;font-weight:600;opacity:0;transition:opacity .2s}
+  .pulse.show{opacity:1}
+  .manual{margin-top:8px;display:flex;gap:8px}
+  .manual input{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:9px;font-size:15px}
+  .manual button{border:1px solid var(--green);background:#fff;color:var(--green);border-radius:8px;padding:0 12px;font-weight:700}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <h1>Scan to list</h1>
+    <a href="#" id="done">Done ✓</a>
+  </header>
+  <div id="stage">
+    <div id="reader"></div>
+    <div id="frame"><div class="win"><div class="laser"></div></div></div>
+    <div class="pulse" id="pulse"></div>
+    <div id="hint">Hold a barcode inside the box</div>
+    <div id="start">
+      <p id="startmsg">Point your camera at product barcodes to add them. Tap below to turn on the camera.</p>
+      <button class="btn" id="startbtn">Start camera</button>
+    </div>
+  </div>
+  <footer>
+    <div><span id="count">0</span> added this session</div>
+    <div id="last">Ready.</div>
+    <div class="manual">
+      <input id="m_upc" type="number" inputmode="numeric" placeholder="Type a UPC if needed">
+      <button id="m_go">Add</button>
+    </div>
+  </footer>
+</div>
+<script>
+(function(){
+  var qs = new URLSearchParams(location.search);
+  var API = qs.get('api') || '';                 // Apps Script /exec URL
+  var PIN = qs.get('pin') || '';
+  var WHO = qs.get('who') || '';
+  if(!PIN){ PIN = prompt('Enter your list PIN') || ''; }
+
+  var startEl=document.getElementById('start');
+  var startMsg=document.getElementById('startmsg');
+  var frame=document.getElementById('frame');
+  var pulse=document.getElementById('pulse');
+  var lastEl=document.getElementById('last');
+  var countEl=document.getElementById('count');
+  var added=0;
+  var busy=false;
+  var lastCode=''; var lastTime=0;
+
+  if(!API){ startMsg.innerHTML='<span class="err">Missing app link. Open this scanner from the 📷 button in your Shopping List app.</span>'; document.getElementById('startbtn').style.display='none'; }
+
+  document.getElementById('done').onclick=function(e){ e.preventDefault(); try{window.close();}catch(x){} history.length>1?history.back():(location.href='about:blank'); };
+
+  function beep(){
+    try{ var c=new (window.AudioContext||window.webkitAudioContext)(); var o=c.createOscillator(); var g=c.createGain();
+      o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.value=.08; o.start(); setTimeout(function(){o.stop();c.close();},120);
+    }catch(e){}
+  }
+  function flash(txt){ pulse.textContent=txt; pulse.classList.add('show'); clearTimeout(pulse._t); pulse._t=setTimeout(function(){pulse.classList.remove('show');},1400); }
+  function setLast(t){ lastEl.textContent=t; }
+
+  // JSONP call to Apps Script (avoids CORS)
+  var jcount=0;
+  function jsonp(params){
+    return new Promise(function(resolve,reject){
+      var cbName='__scancb'+(++jcount);
+      var timer=setTimeout(function(){ cleanup(); reject(new Error('timeout')); }, 15000);
+      function cleanup(){ clearTimeout(timer); delete window[cbName]; if(s.parentNode)s.parentNode.removeChild(s); }
+      window[cbName]=function(data){ cleanup(); resolve(data); };
+      var url=API+(API.indexOf('?')>-1?'&':'?')+params+'&callback='+cbName;
+      var s=document.createElement('script'); s.src=url; s.onerror=function(){ cleanup(); reject(new Error('network')); };
+      document.body.appendChild(s);
+    });
+  }
+
+  function handleCode(code){
+    var now=Date.now();
+    if(busy) return;
+    if(code===lastCode && (now-lastTime)<3500) return;   // debounce repeats
+    lastCode=code; lastTime=now; busy=true;
+    frame.classList.add('locked');
+    if(navigator.vibrate)navigator.vibrate(70); beep();
+    setLast('Looking up '+code+'…');
+    jsonp('action=scan&upc='+encodeURIComponent(code)+'&pin='+encodeURIComponent(PIN)+'&who='+encodeURIComponent(WHO))
+      .then(function(r){
+        if(r&&r.ok){
+          added++; countEl.textContent=added;
+          var nm=(r.product&&r.product.label)||code;
+          var px=(r.product&&r.product.price)?' · $'+r.product.price:'';
+          flash('✓ '+nm.slice(0,30));
+          setLast((r.merged?'↑ qty now '+r.qty+' · ':'Added · ')+nm+px);
+        } else if(r&&r.error==='BAD_PIN'){
+          setLast('PIN rejected — reopen from the app.');
+        } else if(r&&r.error==='NOT_FOUND'){
+          flash('Not found'); setLast('No King Soopers match for '+code+'.');
+        } else if(r&&r.error==='NOT_CONNECTED'){
+          setLast('Connect King Soopers in the app first.');
+        } else {
+          setLast('Error: '+((r&&r.error)||'unknown'));
+        }
+      })
+      .catch(function(e){ setLast('Network error — try again.'); })
+      .then(function(){ setTimeout(function(){ frame.classList.remove('locked'); busy=false; }, 700); });
+  }
+
+  // Manual fallback
+  document.getElementById('m_go').onclick=function(){
+    var v=(document.getElementById('m_upc').value||'').replace(/\D/g,'');
+    if(v.length<8){ setLast('Enter a full UPC (usually 12 digits).'); return; }
+    document.getElementById('m_upc').value=''; lastCode=''; handleCode(v);
+  };
+
+  // Live camera scanning
+  var FORMATS = window.Html5QrcodeSupportedFormats ? [
+    Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39
+  ] : undefined;
+
+  var scanner=null;
+  document.getElementById('startbtn').onclick=function(){
+    if(!window.Html5Qrcode){ startMsg.innerHTML='<span class="err">Scanner library failed to load. Check your connection and reload.</span>'; return; }
+    startEl.style.display='none';
+    scanner=new Html5Qrcode("reader", { formatsToSupport: FORMATS, verbose:false });
+    var config={ fps:12, qrbox:function(w,h){ var bw=Math.floor(Math.min(w,420)*0.78); return {width:bw, height:Math.floor(bw*0.55)}; }, aspectRatio: (window.innerHeight/window.innerWidth) };
+    scanner.start({ facingMode: "environment" }, config,
+      function(decodedText){ handleCode(String(decodedText).replace(/\D/g,'')||decodedText); },
+      function(){ /* per-frame no-match; ignore */ }
+    ).catch(function(err){
+      startEl.style.display='flex';
+      startMsg.innerHTML='<span class="err">Camera couldn\u2019t start: '+(err&&err.message||err)+'<br><br>Make sure you allowed camera access and that this page is on https.</span>';
+    });
+  };
+})();
+</script>
+</body>
+</html>
