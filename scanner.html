@@ -87,11 +87,22 @@
 
   document.getElementById('done').onclick=function(e){ e.preventDefault(); try{ if(scanner&&torchOn) scanner.applyVideoConstraints({advanced:[{torch:false}]}); }catch(x){} try{window.close();}catch(x){} history.length>1?history.back():(location.href='about:blank'); };
 
-  function beep(){
-    try{ var c=new (window.AudioContext||window.webkitAudioContext)(); var o=c.createOscillator(); var g=c.createGain();
-      o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.value=.08; o.start(); setTimeout(function(){o.stop();c.close();},120);
-    }catch(e){}
+  var actx=null;
+  function audio(){ try{ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); }catch(e){ actx=null; } return actx; }
+  function tone(freq,delay,dur,vol,type){
+    var c=audio(); if(!c) return;
+    var o=c.createOscillator(), g=c.createGain();
+    o.type=type||'sine'; o.frequency.value=freq; o.connect(g); g.connect(c.destination);
+    var t=c.currentTime+(delay||0);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(vol||0.08,t+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.start(t); o.stop(t+dur+0.03);
   }
+  function sndDetect(){ tone(720,0,0.07,0.04); }                                  // soft "saw it" tick
+  function sndSuccess(){ tone(660,0,0.10,0.09); tone(988,0.10,0.16,0.09); }       // rising chime = added
+  function sndDup(){ tone(880,0,0.08,0.07); tone(880,0.11,0.10,0.07); }           // double tap = qty bumped
+  function sndFail(){ tone(311,0,0.15,0.10,'square'); tone(196,0.15,0.22,0.10,'square'); } // low buzz = no match/error
   function flash(txt){ pulse.textContent=txt; pulse.classList.add('show'); clearTimeout(pulse._t); pulse._t=setTimeout(function(){pulse.classList.remove('show');},1400); }
   function setLast(t){ lastEl.textContent=t; }
 
@@ -115,7 +126,7 @@
     if(code===lastCode && (now-lastTime)<3500) return;   // debounce repeats
     lastCode=code; lastTime=now; busy=true;
     frame.classList.add('locked');
-    if(navigator.vibrate)navigator.vibrate(70); beep();
+    if(navigator.vibrate)navigator.vibrate(70); sndDetect();
     setLast('Looking up '+code+'…');
     jsonp('action=scan&upc='+encodeURIComponent(code)+'&pin='+encodeURIComponent(PIN)+'&who='+encodeURIComponent(WHO))
       .then(function(r){
@@ -125,17 +136,20 @@
           var px=(r.product&&r.product.price)?' · $'+r.product.price:'';
           flash('✓ '+nm.slice(0,30));
           setLast((r.merged?'↑ qty now '+r.qty+' · ':'Added · ')+nm+px);
+          if(r.merged){ sndDup(); if(navigator.vibrate)navigator.vibrate([40,40,40]); }
+          else { sndSuccess(); if(navigator.vibrate)navigator.vibrate(60); }
         } else if(r&&r.error==='BAD_PIN'){
-          setLast('PIN rejected — reopen from the app.');
+          setLast('PIN rejected — reopen from the app.'); sndFail();
         } else if(r&&r.error==='NOT_FOUND'){
           flash('Not found'); setLast('No King Soopers match for '+code+'.');
+          sndFail(); if(navigator.vibrate)navigator.vibrate([80,60,80]);
         } else if(r&&r.error==='NOT_CONNECTED'){
-          setLast('Connect King Soopers in the app first.');
+          setLast('Connect King Soopers in the app first.'); sndFail();
         } else {
-          setLast('Error: '+((r&&r.error)||'unknown'));
+          setLast('Error: '+((r&&r.error)||'unknown')); sndFail();
         }
       })
-      .catch(function(e){ setLast('Network error — try again.'); })
+      .catch(function(e){ setLast('Network error — try again.'); sndFail(); })
       .then(function(){ setTimeout(function(){ frame.classList.remove('locked'); busy=false; }, 700); });
   }
 
@@ -171,6 +185,7 @@
   document.getElementById('startbtn').onclick=function(){
     if(!window.Html5Qrcode){ startMsg.innerHTML='<span class="err">Scanner library failed to load. Check your connection and reload.</span>'; return; }
     startEl.style.display='none';
+    audio();
     scanner=new Html5Qrcode("reader", { formatsToSupport: FORMATS, verbose:false });
     var config={ fps:12, qrbox:function(w,h){ var bw=Math.floor(Math.min(w,420)*0.78); return {width:bw, height:Math.floor(bw*0.55)}; }, aspectRatio: (window.innerHeight/window.innerWidth) };
     scanner.start({ facingMode: "environment" }, config,
