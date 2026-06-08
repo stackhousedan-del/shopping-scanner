@@ -50,6 +50,7 @@
     <div id="frame"><div class="win"><div class="laser"></div></div></div>
     <div class="pulse" id="pulse"></div>
     <div id="hint">Hold a barcode inside the box</div>
+    <button id="torch" aria-label="Flashlight" style="display:none;position:absolute;left:16px;bottom:16px;width:54px;height:54px;border-radius:50%;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:24px;z-index:6;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4)">🔦</button>
     <div id="start">
       <p id="startmsg">Point your camera at product barcodes to add them. Tap below to turn on the camera.</p>
       <button class="btn" id="startbtn">Start camera</button>
@@ -84,7 +85,7 @@
 
   if(!API){ startMsg.innerHTML='<span class="err">Missing app link. Open this scanner from the 📷 button in your Shopping List app.</span>'; document.getElementById('startbtn').style.display='none'; }
 
-  document.getElementById('done').onclick=function(e){ e.preventDefault(); try{window.close();}catch(x){} history.length>1?history.back():(location.href='about:blank'); };
+  document.getElementById('done').onclick=function(e){ e.preventDefault(); try{ if(scanner&&torchOn) scanner.applyVideoConstraints({advanced:[{torch:false}]}); }catch(x){} try{window.close();}catch(x){} history.length>1?history.back():(location.href='about:blank'); };
 
   function beep(){
     try{ var c=new (window.AudioContext||window.webkitAudioContext)(); var o=c.createOscillator(); var g=c.createGain();
@@ -153,6 +154,20 @@
   ] : undefined;
 
   var scanner=null;
+  var torchBtn=document.getElementById('torch');
+  var torchOn=false;
+  function maybeShowTorch(){
+    var ok=true;
+    try{ var caps=scanner.getRunningTrackCapabilities(); ok=!caps||caps.torch===true||('torch' in caps); }catch(e){ ok=true; }
+    if(ok) torchBtn.style.display='flex';
+  }
+  torchBtn.onclick=function(){
+    if(!scanner) return;
+    var next=!torchOn;
+    scanner.applyVideoConstraints({ advanced:[{ torch: next }] })
+      .then(function(){ torchOn=next; torchBtn.style.background=torchOn?'#ffd23f':'rgba(0,0,0,.55)'; torchBtn.style.color=torchOn?'#1a1a1a':'#fff'; })
+      .catch(function(){ setLast('Flashlight isn\u2019t available on this camera.'); torchBtn.style.display='none'; });
+  };
   document.getElementById('startbtn').onclick=function(){
     if(!window.Html5Qrcode){ startMsg.innerHTML='<span class="err">Scanner library failed to load. Check your connection and reload.</span>'; return; }
     startEl.style.display='none';
@@ -161,7 +176,7 @@
     scanner.start({ facingMode: "environment" }, config,
       function(decodedText){ handleCode(String(decodedText).replace(/\D/g,'')||decodedText); },
       function(){ /* per-frame no-match; ignore */ }
-    ).catch(function(err){
+    ).then(function(){ setTimeout(maybeShowTorch, 350); }).catch(function(err){
       startEl.style.display='flex';
       startMsg.innerHTML='<span class="err">Camera couldn\u2019t start: '+(err&&err.message||err)+'<br><br>Make sure you allowed camera access and that this page is on https.</span>';
     });
