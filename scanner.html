@@ -42,7 +42,7 @@
 <body>
 <div id="wrap">
   <header>
-    <h1>Scan to list <span style="font-size:12px;font-weight:400;opacity:.7">v5</span></h1>
+    <h1>Scan to list <span style="font-size:12px;font-weight:400;opacity:.7">v6</span></h1>
     <a href="#" id="done">Done ✓</a>
   </header>
   <div id="modebar" style="display:flex">
@@ -104,6 +104,9 @@
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
   var MODE='add'; try{ MODE=localStorage.getItem('scanmode')||'add'; }catch(e){}
   var cmpKS=null;
+  var C_DIM={oz:'w',lb:'w',g:'w',kg:'w','fl oz':'v',ml:'v',l:'v',ct:'c'};
+  var C_BASE={oz:28.3495,lb:453.592,g:1,kg:1000,'fl oz':29.5735,ml:1,l:1000,ct:1};
+  function ksPerUnit(p){ return (p.unitPrice!=null&&p.unitPrice!=='')?Number(p.unitPrice):((Number(p.unitAmt)>0&&p.price!=null)?Number(p.price)/Number(p.unitAmt):null); }
   var modeAddBtn=document.getElementById('mode_add'), modeCmpBtn=document.getElementById('mode_cmp');
   function updateModeUI(){
     var add=MODE==='add';
@@ -118,19 +121,21 @@
   modeCmpBtn.onclick=function(){ MODE='compare'; try{localStorage.setItem('scanmode','compare');}catch(e){} updateModeUI(); setLast('Compare mode: scan an item to check its King Soopers price.'); };
   function showCompare(prod){
     cmpKS=prod;
-    var ksUnit=(Number(prod.unitAmt)>0)?(Number(prod.price)/Number(prod.unitAmt)):null;
-    document.getElementById('cmp_ks').innerHTML='<b>King Soopers:</b> '+esc(prod.label||'')+'<br>$'+(prod.price!=null?Number(prod.price).toFixed(2):'?')+(prod.size?(' · '+esc(prod.size)):'')+(ksUnit!=null?(' · <b>$'+ksUnit.toFixed(ksUnit<1?3:2)+'/'+esc(prod.unit)+'</b>'):' · size unknown — can\u2019t do per-unit');
+    var ksU=ksPerUnit(prod);
+    document.getElementById('cmp_ks').innerHTML='<b>King Soopers:</b> '+esc(prod.label||'')+'<br>$'+(prod.price!=null?Number(prod.price).toFixed(2):'?')+(prod.size?(' · '+esc(prod.size)):'')+(ksU!=null&&prod.unit?(' · <b>$'+ksU.toFixed(ksU<1?3:2)+'/'+esc(prod.unit)+'</b>'):' · size unknown — can\u2019t do per-unit');
     var inp=document.getElementById('cmp_in');
-    if(ksUnit!=null){ inp.style.display='block'; document.getElementById('cmp_unit').value=prod.unit; document.getElementById('cmp_price').value=''; document.getElementById('cmp_size').value=''; document.getElementById('cmp_verdict').textContent=''; }
+    if(ksU!=null&&prod.unit){ inp.style.display='block'; document.getElementById('cmp_unit').value=prod.unit; document.getElementById('cmp_price').value=''; document.getElementById('cmp_size').value=''; document.getElementById('cmp_verdict').textContent=''; }
     else { inp.style.display='none'; }
   }
   function recomputeVerdict(){
     var el=document.getElementById('cmp_verdict');
-    if(!cmpKS||!(Number(cmpKS.unitAmt)>0)){ el.textContent=''; return; }
+    var ksU=cmpKS?ksPerUnit(cmpKS):null;
+    if(!cmpKS||ksU==null||!cmpKS.unit||!C_BASE[cmpKS.unit]){ el.textContent=''; return; }
     var p=parseFloat(document.getElementById('cmp_price').value), s=parseFloat(document.getElementById('cmp_size').value), u=document.getElementById('cmp_unit').value;
-    if(!(p>0)||!(s>0)){ el.textContent=''; return; }
-    if(u!==cmpKS.unit){ el.style.color='#ffd23f'; el.textContent='Units differ — KS is in '+cmpKS.unit; return; }
-    var pct=Math.round((1-(p/s)/(Number(cmpKS.price)/Number(cmpKS.unitAmt)))*100);
+    if(!(p>0)||!(s>0)||!C_BASE[u]){ el.textContent=''; return; }
+    if(C_DIM[u]!==C_DIM[cmpKS.unit]){ el.style.color='#ffd23f'; el.textContent='Can\u2019t compare '+u+' to King Soopers\u2019 '+cmpKS.unit; return; }
+    var shelfBase=(p/s)/C_BASE[u], ksBase=ksU/C_BASE[cmpKS.unit];
+    var pct=Math.round((1-shelfBase/ksBase)*100);
     if(pct>0){ el.style.color='#7CFC9A'; el.textContent='✓ '+pct+'% cheaper than King Soopers'; }
     else if(pct<0){ el.style.color='#ff8a8a'; el.textContent='✗ '+(-pct)+'% pricier than King Soopers'; }
     else { el.style.color='#fff'; el.textContent='≈ same as King Soopers'; }
