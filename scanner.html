@@ -63,6 +63,7 @@
       <input id="m_upc" type="number" inputmode="numeric" placeholder="Type a UPC if needed">
       <button id="m_go">Add</button>
     </div>
+    <button id="vibtest" style="margin-top:8px;width:100%;background:none;border:1px solid rgba(255,255,255,.35);color:#fff;border-radius:10px;padding:9px;font-size:13px;cursor:pointer">Test buzz (diagnostic)</button>
   </footer>
 </div>
 <script>
@@ -158,6 +159,13 @@
     var v=(document.getElementById('m_upc').value||'').replace(/\D/g,'');
     if(v.length<8){ setLast('Enter a full UPC (usually 12 digits).'); return; }
     document.getElementById('m_upc').value=''; lastCode=''; handleCode(v);
+  };
+
+  // Diagnostic: report whether the browser accepts a vibration request.
+  document.getElementById('vibtest').onclick=function(){
+    if(!('vibrate' in navigator)){ setLast('Vibration NOT supported by this browser.'); return; }
+    var ok=navigator.vibrate(400);
+    setLast('vibrate(400) returned '+ok+(ok?' — if you felt nothing, it\u2019s a phone setting (silent/DND/haptics/battery saver).':' — the browser blocked it.'));
   };
 
   // Live camera scanning
