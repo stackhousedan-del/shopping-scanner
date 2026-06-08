@@ -42,9 +42,13 @@
 <body>
 <div id="wrap">
   <header>
-    <h1>Scan to list <span style="font-size:12px;font-weight:400;opacity:.7">v4</span></h1>
+    <h1>Scan to list <span style="font-size:12px;font-weight:400;opacity:.7">v5</span></h1>
     <a href="#" id="done">Done ✓</a>
   </header>
+  <div id="modebar" style="display:flex">
+    <button id="mode_add" type="button" style="flex:1;padding:10px;border:none;background:#16633F;color:#fff;font-weight:700;font-size:14px;cursor:pointer">➕ Add to list</button>
+    <button id="mode_cmp" type="button" style="flex:1;padding:10px;border:none;background:#0f4d30;color:#cfe3d6;font-weight:700;font-size:14px;cursor:pointer">⚖️ Compare to KS</button>
+  </div>
   <div id="stage">
     <div id="reader"></div>
     <div id="frame"><div class="win"><div class="laser"></div></div></div>
@@ -59,6 +63,18 @@
   <footer>
     <div><span id="count">0</span> added this session</div>
     <div id="last">Ready.</div>
+    <div id="cmp" style="display:none;background:#0f4d30;border:1px solid rgba(255,255,255,.18);border-radius:12px;padding:12px;margin-bottom:8px;text-align:left">
+      <div id="cmp_ks" style="font-size:13px;color:#cfe3d6">Scan an item to compare its price to King Soopers.</div>
+      <div id="cmp_in" style="display:none;margin-top:10px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:13px">Price here $</span>
+          <input id="cmp_price" type="number" inputmode="decimal" step="0.01" placeholder="0.00" style="flex:1;min-width:70px;background:#fff;color:#1a1a1a;border:none;border-radius:8px;padding:9px">
+          <input id="cmp_size" type="number" inputmode="decimal" step="0.01" placeholder="size" style="width:70px;background:#fff;color:#1a1a1a;border:none;border-radius:8px;padding:9px">
+          <select id="cmp_unit" style="background:#fff;color:#1a1a1a;border:none;border-radius:8px;padding:9px"><option>oz</option><option>fl oz</option><option>lb</option><option>ct</option><option>g</option><option>kg</option><option>ml</option><option>l</option></select>
+        </div>
+        <div id="cmp_verdict" style="margin-top:10px;font-size:18px;font-weight:800;text-align:center"></div>
+      </div>
+    </div>
     <div class="manual">
       <input id="m_upc" type="number" inputmode="numeric" placeholder="Type a UPC if needed">
       <button id="m_go">Add</button>
@@ -83,6 +99,56 @@
   var added=0;
   var busy=false;
   var lastCode=''; var lastTime=0;
+
+  // ---- Compare-to-King-Soopers mode ----
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  var MODE='add'; try{ MODE=localStorage.getItem('scanmode')||'add'; }catch(e){}
+  var cmpKS=null;
+  var modeAddBtn=document.getElementById('mode_add'), modeCmpBtn=document.getElementById('mode_cmp');
+  function updateModeUI(){
+    var add=MODE==='add';
+    modeAddBtn.style.background=add?'#16633F':'#0f4d30'; modeAddBtn.style.color=add?'#fff':'#cfe3d6';
+    modeCmpBtn.style.background=add?'#0f4d30':'#16633F'; modeCmpBtn.style.color=add?'#cfe3d6':'#fff';
+    document.getElementById('cmp').style.display=add?'none':'block';
+    countEl.parentNode.style.display=add?'block':'none';
+    document.getElementById('m_go').textContent=add?'Add':'Check';
+    document.getElementById('hint').textContent=add?'Hold a barcode inside the box':'Compare mode — scan to check vs King Soopers';
+  }
+  modeAddBtn.onclick=function(){ MODE='add'; try{localStorage.setItem('scanmode','add');}catch(e){} updateModeUI(); setLast('Ready.'); };
+  modeCmpBtn.onclick=function(){ MODE='compare'; try{localStorage.setItem('scanmode','compare');}catch(e){} updateModeUI(); setLast('Compare mode: scan an item to check its King Soopers price.'); };
+  function showCompare(prod){
+    cmpKS=prod;
+    var ksUnit=(Number(prod.unitAmt)>0)?(Number(prod.price)/Number(prod.unitAmt)):null;
+    document.getElementById('cmp_ks').innerHTML='<b>King Soopers:</b> '+esc(prod.label||'')+'<br>$'+(prod.price!=null?Number(prod.price).toFixed(2):'?')+(prod.size?(' · '+esc(prod.size)):'')+(ksUnit!=null?(' · <b>$'+ksUnit.toFixed(ksUnit<1?3:2)+'/'+esc(prod.unit)+'</b>'):' · size unknown — can\u2019t do per-unit');
+    var inp=document.getElementById('cmp_in');
+    if(ksUnit!=null){ inp.style.display='block'; document.getElementById('cmp_unit').value=prod.unit; document.getElementById('cmp_price').value=''; document.getElementById('cmp_size').value=''; document.getElementById('cmp_verdict').textContent=''; }
+    else { inp.style.display='none'; }
+  }
+  function recomputeVerdict(){
+    var el=document.getElementById('cmp_verdict');
+    if(!cmpKS||!(Number(cmpKS.unitAmt)>0)){ el.textContent=''; return; }
+    var p=parseFloat(document.getElementById('cmp_price').value), s=parseFloat(document.getElementById('cmp_size').value), u=document.getElementById('cmp_unit').value;
+    if(!(p>0)||!(s>0)){ el.textContent=''; return; }
+    if(u!==cmpKS.unit){ el.style.color='#ffd23f'; el.textContent='Units differ — KS is in '+cmpKS.unit; return; }
+    var pct=Math.round((1-(p/s)/(Number(cmpKS.price)/Number(cmpKS.unitAmt)))*100);
+    if(pct>0){ el.style.color='#7CFC9A'; el.textContent='✓ '+pct+'% cheaper than King Soopers'; }
+    else if(pct<0){ el.style.color='#ff8a8a'; el.textContent='✗ '+(-pct)+'% pricier than King Soopers'; }
+    else { el.style.color='#fff'; el.textContent='≈ same as King Soopers'; }
+  }
+  ['cmp_price','cmp_size','cmp_unit'].forEach(function(id){ var el=document.getElementById(id); el.addEventListener('input',recomputeVerdict); el.addEventListener('change',recomputeVerdict); });
+  updateModeUI();
+  function compareLookup(code){
+    setLast('Checking King Soopers price for '+code+'…');
+    jsonp('action=compare&upc='+encodeURIComponent(code)+'&pin='+encodeURIComponent(PIN))
+      .then(function(r){
+        if(r&&r.ok){ sndSuccess(); setLast('King Soopers match found.'); showCompare(r.product); }
+        else if(r&&r.error==='NOT_FOUND'){ sndFail(); setLast('No King Soopers match for '+code+'.'); document.getElementById('cmp_ks').textContent='No King Soopers equivalent found — can\u2019t compare this one.'; document.getElementById('cmp_in').style.display='none'; }
+        else if(r&&r.error==='NOT_CONNECTED'){ sndFail(); setLast('Connect King Soopers in the app first.'); }
+        else { sndFail(); setLast('Error: '+((r&&r.error)||'unknown')); }
+      })
+      .catch(function(){ setLast('Network error — try again.'); })
+      .then(function(){ setTimeout(function(){ frame.classList.remove('locked'); busy=false; }, 700); });
+  }
 
   if(!API){ startMsg.innerHTML='<span class="err">Missing app link. Open this scanner from the 📷 button in your Shopping List app.</span>'; document.getElementById('startbtn').style.display='none'; }
 
@@ -128,6 +194,7 @@
     lastCode=code; lastTime=now; busy=true;
     frame.classList.add('locked');
     if(navigator.vibrate)navigator.vibrate(120); sndDetect();   // firm buzz the instant a UPC is read
+    if(MODE==='compare'){ compareLookup(code); return; }
     setLast('Looking up '+code+'…');
     jsonp('action=scan&upc='+encodeURIComponent(code)+'&pin='+encodeURIComponent(PIN)+'&who='+encodeURIComponent(WHO))
       .then(function(r){
